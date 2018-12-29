@@ -486,6 +486,8 @@ object higher_order {
               case Right((input, b)) =>
                 Right((input, Right(b)))
             }
+          case Right((input, a)) =>
+            Right((input, Left(a)))
         }
     )
 

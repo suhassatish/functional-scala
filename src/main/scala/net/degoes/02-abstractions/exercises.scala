@@ -4,6 +4,8 @@ package net.degoes.abstractions
 
 import scalaz._
 import Scalaz._
+import net.degoes
+import net.degoes.abstractions
 import net.degoes.arts.exercises.fixpoint.fixed.ListF.Cons
 
 object algebra {
@@ -300,7 +302,7 @@ object functor {
     Functor[FunctorProduct[F, G, ?]] =
       new Functor[FunctorProduct[F, G, ?]] {
         def map[A, B](fa: FunctorProduct[F, G, A])(f: A => B): FunctorProduct[F, G, B] =
-          ???
+          FunctorProduct(fa.l.map(f), fa.r.map(f))
       }
 
   //
@@ -313,7 +315,10 @@ object functor {
     Functor[FunctorSum[F, G, ?]] =
       new Functor[FunctorSum[F, G, ?]] {
         def map[A, B](fa: FunctorSum[F, G, A])(f: A => B): FunctorSum[F, G, B] =
-          ???
+          FunctorSum(fa.run match {
+            case Left(a) => Left(f(a))
+            case Right(a) => Right(f(a))
+          })
       }
 
   //
@@ -328,7 +333,7 @@ object functor {
     Functor[FunctorNest[F, G, ?]] =
       new Functor[FunctorNest[F, G, ?]] {
         def map[A, B](fa: FunctorNest[F, G, A])(f: A => B): FunctorNest[F, G, B] =
-          ???
+          FunctorNest(fa.run.map(_.map(f)))
       }
 
   //
@@ -336,7 +341,12 @@ object functor {
   //
   // Define a natural transformation between `List` and `Option`.
   //
-  val ListToOption: List ~> Option = ???
+  val ListToOption: List ~> Option =
+    new NaturalTransformation[List, Option] {
+      def apply[A](fa: List[A]): Option[A] =
+        fa.headOption
+    }
+
   ListToOption(List(1, 2, 3))
   ListToOption(List("foo", "bar", "baz"))
 
@@ -356,6 +366,7 @@ object functor {
     def apply[A](fa: F[A]): G[A]
   }
   type ~> [F[_], G[_]] = NaturalTransformation[F, G]
+  type ~> [F[_], G[_]] = [A] F[A] => G[A]
 
   case class Validation[+A](run: Either[List[String], A]) {
     def map[B](f: A => B): Validation[B] = run match {
@@ -394,6 +405,11 @@ object functor {
   (key ~ map).map {
     case (key, map) => map.get(key)
   }
+
+  sealed trait Asm
+  case class PushInt(v: Int) extends Asm
+  case object Mul extends Asm
+  def foo(asm: Asm)
 
   //
   // EXERCISE 10
@@ -444,6 +460,18 @@ object functor {
     new Zip[Parser[E, ?]] {
       def map[A, B](fa: Parser[E, A])(f: A => B): Parser[E, B] =
         ParserFunctor.map(fa)(f)
+
+      def ~ [A, B](l: Parser[E, A], r: Parser[E, B]): Parser[E, (A, B)] =
+        Parser[E, (A, B)]((input: String) =>
+          (l.run(input) match {
+            case Left(e) => Left(e)
+            case Right((input, a)) =>
+              r.run(input) match {
+                case Left(e) => Left(e)
+                case Right((input, b)) =>
+                  Right((input, (a, b)))
+              }
+          }) : Either[E, (String, (A, B))])
 
       def zip[A, B](l: Parser[E, A], r: Parser[E, B]): Parser[E, (A, B)] =
         ???
@@ -511,6 +539,15 @@ object functor {
         zip(f, fa).map(t => t._1(t._2))
     }
 
+  trait Monad[F[_]] {
+    def bind[A, B](fa: F[A])(f: A => F[B]): F[B]
+  }
+  println("Hello. What is your name?")
+  val name = readLine()
+  if (name == "John")
+    println("Good luck teaching")
+  else println("Good luck attending")
+
   //
   // EXERCISE 17
   //
@@ -536,10 +573,15 @@ object functor {
   implicit def MonadParser[E]: Monad[Parser[E, ?]] =
     new Monad[Parser[E, ?]] {
       def point[A](a: => A): Parser[E, A] =
-        ???
+        Parser[E, A]((input: String) => Right((input, a)))
 
       def bind[A, B](fa: Parser[E, A])(f: A => Parser[E, B]): Parser[E, B] =
-        ???
+        Parser[E, B]((input: String) =>
+          (fa.run(input) match {
+            case Left(e) => Left(e)
+            case Right((input, a)) => f(a).run(input)
+          }) : Either[E, (String, B)]
+        )
     }
 
   //
@@ -547,7 +589,28 @@ object functor {
   //
   // Define an instance of `Monad` for `Identity`.
   //
-  case class Identity[A](run: A)
+  case class Identity[A](run: A) {
+    def map[B](f: A => B): Identity[B] =
+      Identity(f(run))
+  }
+  sealed trait Option[+A] {
+    def map[B](f: A => B): Option[B] = this match {
+      case None => None
+      case Some(a) => Some(f(a))
+    }
+  }
+
+  final case object None extends Option[Nothing]
+  final case class Some[A](value: A) extends Option[A]
+  sealed trait List[+A] {
+    def map[B](f: A => B): List[B] = this match {
+      case Nil => Nil
+      case Cons(a, as) => Cons(f(a), as.map(f))
+    }
+  }
+  final case object Nil extends List[Nothing]
+  final case class Cons[A](a: A, as: List[A]) extends List[A]
+
   implicit val IdentityMonad: Monad[Identity] =
     new Monad[Identity] {
       def point[A](a: => A): Identity[A] =
@@ -577,6 +640,19 @@ object functor {
       v2 <- integers
       p  <- if ((v2 - v1).abs == 2) List(v1 -> v2) else Nil
     } yield p
+
+  val solution2 = for {
+    a <- fa
+    b <- fb(a)
+    c <- fc(a, b)
+  } yield d
+
+  fa.flatMap(a =>
+    fb(a).flatMap(b =>
+      fc(a,b).map(c =>
+        c
+      ))
+  )
 }
 
 object parser {
@@ -710,10 +786,16 @@ object foldable {
   implicit val FoldableBTree: Foldable[BTree] =
     new Foldable[BTree] {
       def foldMap[A, B: Monoid](fa: BTree[A])(f: A => B): B =
-        ???
+        fa match {
+          case Leaf(a) => f(a)
+          case Fork(l, r) => foldMap(l)(f) |+| foldMap(r)(f)
+        }
 
       def foldRight[A, B](fa: BTree[A], z: => B)(f: (A, => B) => B): B =
-        ???
+        fa match {
+          case Leaf(a) => f(a, b)
+          case Fork(l, r) => foldRight(l, foldRight(r, z)(f))(f)
+        }
     }
   val btree: BTree[String] = Fork(Leaf("foo"), Fork(Leaf("bar"), Leaf("baz")))
 
@@ -733,8 +815,20 @@ object foldable {
     new Traverse[BTree] {
       def traverseImpl[G[_]: Applicative, A, B](
         fa: BTree[A])(f: A => G[B]): G[BTree[B]] =
-          ???
+        fa match {
+          case Leaf(a) => f(a).map(Leaf(_))
+          case Fork(l, r) =>
+            val l2: G[BTree[B]] = traverseImpl(l)(f)
+            val r2: G[BTree[B]] = traverseImpl(r)(f)
+
+            (l2 |@| r2)(Fork(_, _))
+        }
     }
+
+  trait Traverse[F[_]] {
+    def forEach[G[_]: Applicative, A, B](
+      collection: F[A])(body: A => G[B]): G[F[B]]
+  }
 
   //
   // EXERCISE 5

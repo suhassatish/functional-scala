@@ -2,6 +2,8 @@
 
 package net.degoes.effects
 
+import java.io.IOException
+
 import scalaz.zio.{Schedule, _}
 import scalaz.zio.console._
 
@@ -1353,7 +1355,8 @@ object zio_schedule {
     ((Schedule.exponential(10.millis).whileOutput(_ < 60.seconds)) andThen
       (Schedule.fixed(60.seconds) && Schedule.recurs(100))).jittered *> Schedule.identity[A].collect
 
-
+    (getStrLn : IO[IOException, String]).repeat(mySchedule[String])
+    (getStrLn : IO[IOException, String]).retry(mySchedule[IOException])
 }
 
 object zio_interop {
